@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Refract Transparency Demo</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { margin-top: 0; }
+    h2 { margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .3rem; }
+    .row { display: flex; gap: .5rem; align-items: center; margin-bottom: .5rem; flex-wrap: wrap; }
+    input, select, button { padding: .35rem .6rem; font: inherit; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+    button { cursor: pointer; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button.danger  { background: #dc2626; color: #fff; border-color: #dc2626; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: .4rem .6rem; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }
+    th { background: #f5f5f7; }
+    code { background: #f5f5f7; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .pill.success { background: #dcfce7; color: #166534; }
+    .pill.error   { background: #fee2e2; color: #991b1b; }
+    .pill.write   { background: #fef3c7; color: #92400e; }
+    .pill.read    { background: #dbeafe; color: #1e40af; }
+    .pill.high    { background: #fecaca; color: #7f1d1d; }
+    .pill.medium  { background: #fed7aa; color: #9a3412; }
+    .pill.low     { background: #fde68a; color: #854d0e; }
+    .muted { color: #888; font-size: 11px; }
+    details { margin-top: .25rem; }
+    details > summary { cursor: pointer; color: #555; font-size: 12px; }
+    pre { background: #f9f9f9; padding: .5rem; border-radius: 4px; font-size: 11px; overflow: auto; max-height: 200px; }
+  </style>
+</head>
+<body>
+
+<h1>Refract Transparency</h1>
+<p class="muted">
+  Zero-framework demo of the §21 endpoints. Auth is via <code>X-User-Id</code> / <code>X-User-Roles</code> headers — wire your real auth in production.
+</p>
+
+<div class="row">
+  <label>Acting as user_id:</label>
+  <input id="userId" value="u_demo" />
+  <label>Roles:</label>
+  <input id="roles" value="member" size="20" />
+  <button class="primary" onclick="refreshAll()">Refresh all</button>
+</div>
+
+<!-- ── Surface A ──────────────────────────────────────────────────────────── -->
+<h2>A. Active AI context</h2>
+<div class="row">
+  <label>Current route:</label>
+  <input id="route" value="/team" size="30" />
+  <button onclick="loadContext()">Load</button>
+</div>
+<div id="context"></div>
+
+<!-- ── Surface B ──────────────────────────────────────────────────────────── -->
+<h2>B. My AI activity</h2>
+<div id="activity"></div>
+
+<h2>B. My API keys</h2>
+<div class="row">
+  <input id="keyName" placeholder="key name (e.g. my-laptop)" />
+  <input id="keyScopes" value="actions:*" placeholder="scopes (comma-separated)" />
+  <input id="keyTtl" value="90" type="number" size="4" />
+  <span>days</span>
+  <button class="primary" onclick="createKey()">Create</button>
+</div>
+<div id="keys"></div>
+
+<!-- ── Surface C ──────────────────────────────────────────────────────────── -->
+<h2>C. Admin view</h2>
+<p class="muted">Requires <code>admin</code> in the Roles input above.</p>
+<div id="adminActivity"></div>
+<div id="anomalies" style="margin-top:1rem;"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const headers = () => ({
+  'Content-Type': 'application/json',
+  'X-User-Id': $('userId').value,
+  'X-User-Roles': $('roles').value,
+});
+
+async function fetchJSON(url, opts = {}) {
+  const res = await fetch(url, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+  return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+}
+
+function pill(cls, text) { return `<span class="pill ${cls}">${text}</span>`; }
+function escape(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function loadContext() {
+  const r = await fetchJSON(`/api/v1/me/ai-context?route=${encodeURIComponent($('route').value)}`);
+  if (!r.ok) return $('context').innerHTML = `<pre>${escape(JSON.stringify(r.body, null, 2))}</pre>`;
+  const ctx = r.body;
+  $('context').innerHTML = `
+    <p><b>Active domains:</b> ${ctx.domains.map(d => `<code>${escape(d)}</code>`).join(' ')}</p>
+    <table>
+      <tr><th>Tool</th><th>Risk</th><th>Domain</th><th>Description</th></tr>
+      ${ctx.actions.map(a => `<tr>
+        <td><code>${escape(a.name)}</code></td>
+        <td>${pill(a.risk, a.risk)}</td>
+        <td>${escape(a.domain)}</td>
+        <td>${escape(a.description)}</td>
+      </tr>`).join('')}
+    </table>
+  `;
+}
+
+async function loadActivity() {
+  const r = await fetchJSON('/api/v1/me/ai-activity?limit=20');
+  if (!r.ok) return $('activity').innerHTML = `<pre>${escape(JSON.stringify(r.body, null, 2))}</pre>`;
+  const page = r.body;
+  $('activity').innerHTML = `
+    <p class="muted">${page.items.length} of ${page.total}${page.truncated ? ' (truncated)' : ''}</p>
+    <table>
+      <tr><th>When</th><th>Action</th><th>Status</th><th>Delegation</th><th>Detail</th></tr>
+      ${page.items.map(r => `<tr>
+        <td><span class="muted">${escape(r.timestamp)}</span></td>
+        <td><code>${escape(r.action_name || r.event)}</code></td>
+        <td>${pill(r.status === 'success' ? 'success' : 'error', r.status || r.event)}</td>
+        <td><span class="muted">${escape(r.data.delegation?.via || '-')}</span></td>
+        <td>
+          ${r.data.undoable ? `<button class="danger" onclick="undo('${r.id}')">Undo</button>` : ''}
+          <details><summary>raw</summary><pre>${escape(JSON.stringify(r.data, null, 2))}</pre></details>
+        </td>
+      </tr>`).join('')}
+    </table>
+  `;
+}
+
+async function undo(id) {
+  if (!confirm(`Undo activity ${id}?`)) return;
+  const r = await fetchJSON(`/api/v1/me/ai-activity/${id}/undo`, { method: 'POST' });
+  alert(JSON.stringify(r.body));
+  loadActivity();
+}
+
+async function loadKeys() {
+  const r = await fetchJSON('/api/v1/me/ai-keys');
+  if (!r.ok) return $('keys').innerHTML = `<pre>${escape(JSON.stringify(r.body, null, 2))}</pre>`;
+  const items = r.body.items;
+  $('keys').innerHTML = `
+    <table>
+      <tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Status</th><th>Created</th><th>Expires</th><th></th></tr>
+      ${items.map(k => `<tr>
+        <td>${escape(k.name)}</td>
+        <td><code>${escape(k.prefix)}…</code></td>
+        <td>${k.scopes.map(s => `<code>${escape(s)}</code>`).join(' ')}</td>
+        <td>${pill(k.status === 'active' ? 'success' : 'error', k.status)}</td>
+        <td><span class="muted">${escape(k.created_at)}</span></td>
+        <td><span class="muted">${escape(k.expires_at || 'never')}</span></td>
+        <td>${k.status === 'active' ? `<button class="danger" onclick="revoke('${k.id}')">Revoke</button>` : ''}</td>
+      </tr>`).join('')}
+    </table>
+  `;
+}
+
+async function createKey() {
+  const r = await fetchJSON('/api/v1/me/ai-keys', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: $('keyName').value || 'key',
+      scopes: $('keyScopes').value.split(',').map(s => s.trim()),
+      ttl_days: Number($('keyTtl').value) || undefined,
+    }),
+  });
+  if (!r.ok) return alert(JSON.stringify(r.body));
+  alert(`Secret (shown ONCE, save it now):\n\n${r.body.secret}`);
+  loadKeys();
+}
+
+async function revoke(id) {
+  if (!confirm(`Revoke key ${id}?`)) return;
+  await fetchJSON(`/api/v1/me/ai-keys/${id}/revoke`, { method: 'POST' });
+  loadKeys();
+}
+
+async function loadAdmin() {
+  const r = await fetchJSON('/api/v1/admin/ai-activity?limit=10');
+  if (!r.ok) return $('adminActivity').innerHTML = `<p class="muted">Need admin role: ${escape(JSON.stringify(r.body))}</p>`;
+  const page = r.body;
+  $('adminActivity').innerHTML = `
+    <p class="muted">Org-wide activity (newest first), ${page.total} total</p>
+    <table>
+      <tr><th>When</th><th>User</th><th>Action</th><th>Status</th></tr>
+      ${page.items.map(r => `<tr>
+        <td><span class="muted">${escape(r.timestamp)}</span></td>
+        <td><code>${escape(r.actor_user_id || '-')}</code></td>
+        <td><code>${escape(r.action_name || r.event)}</code></td>
+        <td>${pill(r.status === 'success' ? 'success' : 'error', r.status || r.event)}</td>
+      </tr>`).join('')}
+    </table>
+  `;
+
+  const a = await fetchJSON('/api/v1/admin/ai-anomalies');
+  if (!a.ok) return;
+  const findings = a.body.findings;
+  $('anomalies').innerHTML = findings.length === 0
+    ? `<p class="muted">No anomalies detected.</p>`
+    : `<h3>Anomalies</h3>
+       <table>
+         <tr><th>Kind</th><th>User</th><th>Count</th><th>Window</th><th>Severity</th></tr>
+         ${findings.map(f => `<tr>
+           <td><code>${escape(f.kind)}</code></td>
+           <td><code>${escape(f.user_id)}</code></td>
+           <td>${f.count} (threshold ${f.threshold})</td>
+           <td>${f.window_minutes} min</td>
+           <td>${pill(f.severity, f.severity)}</td>
+         </tr>`).join('')}
+       </table>`;
+}
+
+function refreshAll() {
+  loadContext();
+  loadActivity();
+  loadKeys();
+  loadAdmin();
+}
+
+refreshAll();
+</script>
+
+</body>
+</html>
