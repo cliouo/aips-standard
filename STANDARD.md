@@ -4,7 +4,7 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | v0.1 (草案) |
+| 版本 | v0.2 (草案) |
 | 起草日期 | 2026-05-22 |
 | 状态 | Draft — 可演化，等待生产反馈 |
 | 关键词措辞 | 遵循 RFC 2119（MUST / SHOULD / MAY） |
@@ -49,6 +49,7 @@
 4. **§21 透明度三 surface**（A: ai-context / B: ai-activity+keys / C: admin+anomalies）
 5. **§18 NEEDS_CLARIFICATION + candidates 协议** —— Refract 原创
 6. **§4 risk × requiresConfirmation × undo 三元组**作为 Action 定义的强制属性
+7. **§24-§27 交互模型四正交轴**：执行形状（§24）/ 操作权姿态（§25）/ 结果呈现（§26）/ 执行时序（§27）—— 把"Action 层如何被消费"形式化
 
 **本标准不重新发明**：CHEQ wire format、AAT 字段集、Spotlighting 三模式、Agent Skills frontmatter、MCP 工具发现、A2A 任务模型。这些直接采纳或 wire-compatible。
 
@@ -60,11 +61,15 @@
 |---|---|
 | **Action** | 一个面向用户意图的工具，可能由若干原始 REST 调用组合而成。是 AI 可调用的最小单元 |
 | **Action 层** | 所有 Action 的注册表 + 派发器 + 中间件，是本标准的核心组件 |
-| **Card** | 描述某业务域的 markdown 文档，含工作流说明 + 该域 Action 索引。Embedded 入口按情境注入，Terminal 入口表现为 `SKILL.md` |
+| **Card** | 描述某业务域的 markdown 文档，含工作流说明 + 该域 Action 索引。Embedded 入口按情境注入，Terminal 入口表现为 `SKILL.md`。钉死单张运行即 Bounded Agent（§24） |
 | **Confirmation Token** | 服务端在写操作 pending 时颁发的一次性令牌 |
 | **Idempotency Key** | 客户端为每次 Action 调用生成的唯一 ID，用于去重 |
 | **Delegation** | "AI 代表某个具体用户调用平台" 的关系，包含 user_id + session/api_key + ai_message_id |
 | **Never-List** | Action 注册表外的、AI 永不可触达的操作集合 |
+| **执行形状（Execution Shape）** | Action 被 AI 消费的方式：Deterministic / Generative Action、Bounded Agent、Open Assistant（§24） |
+| **Generative Action** | handler 内部跑固定 LLM 流水线产出结构化 / 文档结果的 Action；AI 是其中一步，非司机（§24） |
+| **Bounded Agent** | 钉死在单张 Card 上、不可切换的 LLM 工具调用循环（§24） |
+| **操作权姿态（Operator Stance）** | 自动驾驶（AI 操作、用户委派）/ 副驾（用户操作、AI 参谋）（§25） |
 
 ---
 
@@ -548,6 +553,7 @@ referenced_actions: [invite_team_member, ...]
 ---
 ```
 - CI MUST 校验 `referenced_actions` 都存在且未被移除
+- 一张 Card 若要作为 Bounded Agent 单独运行（§24），SHOULD 增加可选字段：`goal`（单一目标描述）、`termination`（终止工具 / 状态，如 `[submit, give_up]`）、`runaway`（覆盖 §14 的轮数 / 预算）
 
 ### Upstream alignment — Anthropic Agent Skills v1
 
@@ -732,6 +738,124 @@ metadata:
 
 ---
 
+## 24. 执行形状（Execution Shapes）
+
+**不变量**：Action 层是唯一能力来源；AI 以何种"形状"消费它是一个**显式分类**，决定该套用哪些护栏。
+
+执行形状由两个正交旋钮决定：
+
+- **控制流由谁驱动**：代码（确定的代码路径）/ LLM（模型自己决定下一步）
+- **能力范围是否可切换**：单一固定 scope / 多 Card 动态切换
+
+| | scope 固定 / 单一 | scope 可切换 / 多技能 |
+|---|---|---|
+| **代码驱动** | Deterministic / Generative Action | 编排器（router）|
+| **LLM 驱动** | **Bounded Agent**（单 Card 钉死）| **Open Assistant**（多 Card 可切）|
+
+- **Deterministic Action**：handler 纯代码，同输入同输出（§4 默认）。
+- **Generative Action**：handler 内部跑一条**固定** LLM 流水线（一次或多次预定顺序的模型调用）产出结构化 / 文档结果。AI 是流水线里的一步，不是司机。
+- **Bounded Agent**：在一张**预先激活、不可切换**的 Card 上跑 LLM 工具调用循环——即"钉死在单张 Card 上的 Open Assistant"。
+- **Open Assistant**：加载多张 Card、按情境动态切换的 LLM 循环（如 Embedded 聊天框）。
+
+### MUST
+- Action spec MUST 声明执行形状 `kind: deterministic | generative`，默认 `deterministic`。
+- `kind: generative` 的输出信封 MUST 带内容来源标记 `provenance: generated | retrieved | mixed`；下游 surface 与终端用户 MUST 能区分"AI 生成物"与"系统事实"。
+- Generative Action 的自由文本输入 MUST 视为不可信注入面：内部 LLM 调用前 MUST 套用 §10 Spotlighting 与 §22 redaction（注入与 PII 防护从聊天边界**下沉到 Action 内部**）。
+- Bounded Agent 与 Open Assistant MUST 受 §14 失控保护约束，并产出明确终止态。
+- Agent 循环内对每个 Action 的调用 MUST 仍走完整中间件链（§3）——MUST NOT 绕过 never-list / confirmation / audit。
+
+### SHOULD
+- Generative Action SHOULD 声明 `idempotent: false`：同输入产出可变。§7 幂等键此时语义为"不重复执行 / 不重复计费"，非"保证输出一致"。
+- Bounded Agent SHOULD 复用 §1 Card：一个 Bounded Agent = 一张带 `goal` + 终止契约的 Card；**同一张 Card** 既可被 Open Assistant 动态加载，也可被钉死单独运行（standalone 功能页 / 被委派的 subagent / 对外 A2A `AgentSkill`，见 §20.2 / §26）。
+- Card 元数据 SHOULD 增加可选 agent 字段：`goal` / `termination` / `runaway`（见 §16）。
+
+### MUST NOT
+- Generative Action 内部 LLM 一旦开始**自主选择任意 Action 并循环**，它 MUST 升级为 Bounded Agent / Open Assistant 治理（声明 Card + 上 §14）。形状间 MUST NOT 隐式滑移而不升级护栏。
+
+### 治理模型（控制反转）
+
+两种安全治理模型，按任务类型选其一：
+
+- **平台调度 / AI 受限**：靠**缩小可达 Action 集**兜底——运维类、破坏性操作适用（§12 Never-List + §4 `risk` 的默认姿态）。
+- **AI 调度 / 平台供工具**：AI 当大脑、平台退成工具箱，靠"**唯一写操作 = 人审**" + "一切输出可独立验证" + §14 失控上限兜底——调研 / 起草 / 数据富化类适用。
+
+无论哪种，实现 MUST 保留四条底座：**可验证工具、写操作人审（§6）、失控上限（§14）、审计（§13）**。
+
+---
+
+## 25. 操作权姿态（Operator Stance）
+
+**不变量**：每个 AI 交互显式属于一种操作权姿态；姿态决定结果渲染面（§26）与确认护栏（§6）强度，且与执行形状（§24）、执行时序（§27）**正交**。
+
+- **Autopilot（自动驾驶 / 委派）**：AI 是操作者，用户发包。注意力主场 = 对话 surface；平台 UI 可选。
+- **Copilot（副驾 / 增强）**：用户是操作者，AI 在旁参谋（预填、预点、提示）。注意力主场 = 平台页面；对话 surface 是辅助。
+
+**试金石（SHOULD）**：主场 surface = 用户注意力所在——住在对话框即 autopilot，住在页面即 copilot。
+
+姿态是一条**自动化滑杆**（levels of automation），非二元：
+
+```
+手动 ─ AI建议(人动手) ─ AI预填/预点(人确认) ─ AI执行+关键点人批 ─ AI全自动+事后报告
+ 副驾 ───────────────────────────────────►        ◄──────────── 自动驾驶
+```
+
+### MUST
+- 可达自动化档位 MUST 受 §4 `risk` 约束：`dangerous` MUST NOT 越过"关键点人批"（始终要求 §6 确认）；`write` 默认 ≤ "AI执行 + 人批"；`read` MAY 全自动。
+- 姿态 MUST 决定确认护栏：
+  - **Autopilot**：用户不盯每一步 → MUST 强检查点（清晰结果展示 + 写前显式确认 + 审计 + 可撤销）。
+  - **Copilot**：用户在环 → 单步确认 MAY 从轻（pending 可见），但 AI MUST NOT 自动提交、MUST NOT 抢占焦点（§26 交互不变量）。
+
+### SHOULD
+- 姿态 SHOULD 决定渲染面（§26）：autopilot → 对话内结构化卡片；copilot → 驱动用户当前页面表单 / 面板（pending 态）。
+- 同一能力（Action / Card）SHOULD 能在两种姿态运行——姿态是**调用时**的选择，非两套实现；区别仅在发起点与结果挂载面。
+- 平台 SHOULD 为每个 AI 功能声明默认姿态，并允许用户在风险允许范围内调档。
+
+### MUST NOT
+- MUST NOT 把姿态与执行形状（§24）或渲染面（§26）混同——三者正交。
+
+---
+
+## 26. 结果呈现与确认 Surface（Result Presentation）
+
+**不变量**：模型只产**结构化数据**；"长什么样"由可信前端决定。模型 MUST NOT 产出供直接渲染的 markup。
+
+### MUST
+- AI 结果 MUST 以结构化数据（typed Action output / tool result）返回；渲染由前端按结果类型注册的**可信组件**完成。
+- 实现 MUST NOT 渲染模型生成的 HTML（XSS / UI 注入面，见 §10），且 MUST NOT 依赖模型生成的 markdown 作为唯一富展示手段。
+- 写操作确认闸门（§6）MUST 内嵌在结果呈现 surface 上（如审核卡片的"提交"按钮），**人点才写**。
+- 提交前 MUST NOT 写入任何持久数据——所见即"待批"，不是"已改"。
+
+### SHOULD — 渲染面选择
+- 结果是**独立待审产物**（草稿、报告、待建记录）→ 渲染为发起点（对话或页面）内的**交互式卡片 / 面板**。
+- 结果是**当前页面某对象的就地编辑** → 驱动该页已有表单（pending 态）。
+- 提交后 SHOULD 将大产物**塌缩为一行确认 + 指向真实记录的深链**——真相留在平台，避免会话堆积巨型产物，用户无需刷新。
+- 过程步骤（中间工具调用）SHOULD 以结构化步骤**流式**呈现为轻量时间线，而非模型散文复述（省上下文、可审计、喂 §13 / §21）。
+
+### SHOULD — 交互不变量（尤其 copilot）
+- AI 预填的表单 / 面板 MUST NOT 是 modal（无"点外部即关闭"）；其生死 MUST 仅绑显式动作（保存 / 取消 / 丢弃），MUST NOT 绑失焦。
+- pending 状态 SHOULD 持久化（落 draft store），跨焦点切换与页面导航存活——用户可离开再回来继续。
+- 对话 surface 与被预填表单 SHOULD 绑定**同一份 draft 状态**：对话里的自然语言修正 SHOULD 就地更新 pending 表单（对话即表单的自然语言控制器，非另一处）。
+
+---
+
+## 27. 执行时序（Execution Timing）
+
+**不变量**：同步内联还是异步后台，由任务**耗时**决定，与操作权姿态（§25）正交。
+
+### MUST
+- 预计耗时超过交互阈值（SHOULD 取 ~3-5s）的任务 MUST 异步执行：后台作业 + 持久化 pending 结果 + 完成后通知；MUST NOT 阻塞用户停留发起页干等。
+- 异步任务结果 MUST 挂在其所属对象 / 记录上（而非"当前页面"），使用户离开后仍能回来认领。
+
+### SHOULD
+- 真正快（亚秒~数秒）的助攻（补全、即时建议、单字段填充）SHOULD 保持同步内联——后台化反增延迟与通知噪声。
+- 异步完成 SHOULD 通过通知 / 角标拉回用户，并在 §21 透明层"AI 活动"流可见（不论 autopilot 还是 copilot 发起）。
+- 异步任务运行中 SHOULD 流式输出进度步骤（§26）。
+
+### MUST NOT
+- MUST NOT 把"后台 vs 阻塞"绑死到 autopilot vs copilot——copilot 的慢任务同样 MUST 异步，以使用户能自由切走。
+
+---
+
 ## 优先级与实施阶段
 
 ### v1.0 必须（Foundation）
@@ -756,10 +880,14 @@ metadata:
 - §20 跨客户端可移植
 - §21 透明度
 - §22 合规
+- §24 执行形状（generative action 的注入 / provenance / 失控护栏）
 
 ### v1.2 进阶（Maturity）
 - §19 评测套件
 - §23 跨入口连续性
+- §25 操作权姿态
+- §26 结果呈现与确认 surface
+- §27 执行时序
 
 ---
 
@@ -780,6 +908,7 @@ metadata:
     "requires_confirmation": { "type": "boolean" },
     "ai_invocable": { "type": "boolean" },
     "idempotent": { "type": "boolean", "default": false },
+    "kind": { "enum": ["deterministic", "generative"], "default": "deterministic" },
     "owner": { "type": "string" },
     "domain": { "type": "string" },
     "last_reviewed": { "type": "string", "format": "date" },
@@ -878,6 +1007,7 @@ cases:
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
 | 0.1 | 2026-05-22 | 初稿，建立 20+ 节框架 |
+| 0.2 | 2026-05-26 | 新增 §24-§27 交互模型（执行形状 / 操作权姿态 / 结果呈现 / 执行时序）|
 
 ---
 

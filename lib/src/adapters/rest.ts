@@ -57,6 +57,12 @@ export function createRestHandler<API>(
         headers['X-Deprecated'] = `deprecated since ${action.spec.deprecatedAt}, removed at ${removed}${replacement}`;
       }
 
+      // §24 — surface output provenance so the consumer can label
+      // AI-generated content vs system fact (esp. for kind: 'generative').
+      if (action?.spec.provenance) {
+        headers['X-Refract-Provenance'] = action.spec.provenance;
+      }
+
       return { status: 200, body: result, headers };
     } catch (e) {
       if (e instanceof RefractError) {
@@ -132,6 +138,8 @@ export function mountExpress<API>(
         version: a.spec.version,
         description: a.spec.description,
         risk: a.spec.risk,
+        kind: a.spec.kind ?? 'deterministic',
+        provenance: a.spec.provenance ?? 'retrieved',
         domain: a.spec.domain,
         ai_invocable: a.spec.aiInvocable !== false,
         deprecated_at: a.spec.deprecatedAt ?? null,

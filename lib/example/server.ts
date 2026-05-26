@@ -65,6 +65,7 @@ import {
 import { platformAPI, type PlatformAPI } from './platform-api.js';
 import { listCustomers } from './actions/list-customers.js';
 import { inviteTeamMember } from './actions/invite-team-member.js';
+import { generateReport } from './actions/generate-report.js';
 
 // ─── §11 Redaction policy ────────────────────────────────────────────────────
 // Field-level rules — applied to every Action's output before return.
@@ -88,7 +89,7 @@ const registry = new ActionRegistry({
   neverList: defaultNeverList(),
 });
 
-registry.register(listCustomers, inviteTeamMember);
+registry.register(listCustomers, inviteTeamMember, generateReport);
 
 // ─── Audit, API keys, decider, anomaly ───────────────────────────────────────
 

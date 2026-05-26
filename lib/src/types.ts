@@ -7,6 +7,14 @@ import type { Errors } from './errors.js';
 
 export type Risk = 'read' | 'write' | 'dangerous';
 
+/** §24 — how an Action executes internally. 'generative' = handler runs a
+ *  fixed LLM pipeline; the AI is a step *inside* the action, not the driver. */
+export type ExecutionKind = 'deterministic' | 'generative';
+
+/** §24 — provenance of an Action's output, surfaced to consumers so they can
+ *  distinguish AI-generated content from system fact. */
+export type Provenance = 'generated' | 'retrieved' | 'mixed';
+
 export interface Delegation {
   via: 'ai_chat' | 'cli' | 'mcp' | 'a2a' | 'direct';
   session_id?: string;
@@ -89,6 +97,15 @@ export interface ActionSpec<
   input: TI;
   output: TO;
   risk: Risk;
+
+  // §24 — execution shape. 'generative' means the handler runs a fixed LLM
+  // pipeline internally (expect latency + non-determinism). Default 'deterministic'.
+  kind?: ExecutionKind;
+
+  // §24 — output provenance marker, surfaced on the REST X-Refract-Provenance
+  // header + audit record. Defaults: deterministic → 'retrieved',
+  // generative → 'generated'. Use 'mixed' when output blends both.
+  provenance?: Provenance;
 
   // §4 — default true; set false to hide from AI invocation entirely
   aiInvocable?: boolean;

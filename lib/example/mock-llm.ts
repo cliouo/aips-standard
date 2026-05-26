@@ -40,6 +40,17 @@ export const mockInvoke: LLMInvoker = async ({ user, tools }) => {
     };
   }
 
+  // Match report-generation intent (§24 Generative Action)
+  if (/(周报|月报|报告|总结|report|summary)/.test(text) && toolNames.has('generate_report')) {
+    let period: 'week' | 'month' | 'quarter' = 'week';
+    if (/(月|month)/.test(text)) period = 'month';
+    else if (/(季|quarter)/.test(text)) period = 'quarter';
+    return {
+      tool_name: 'generate_report',
+      tool_input: { period },
+    };
+  }
+
   // Match list intent
   if (
     /(列表|看.*客户|客户列表|前\s*\d+\s*个?\s*客户|\d+\s*个?\s*客户|list|customers?)/.test(text) &&

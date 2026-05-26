@@ -63,7 +63,7 @@ open http://localhost:3000/transparency
 
 | 命令 | 干什么 |
 |---|---|
-| `npm test` | 跑 55 个单元测试（vitest） |
+| `npm test` | 跑 85 个单元测试（vitest） |
 | `npm run typecheck` | 严格模式 tsc 检查 |
 | `npm run dev` | Express 服务（HTTP / OpenAPI / SKILL / 透明度） |
 | `npm run demo` | 模拟一轮 AI 对话，串通 confirmation flow |
@@ -161,9 +161,10 @@ lib/
 │
 ├── example/                      可运行示例（模拟 Acme 平台）
 │   ├── platform-api.ts           假的"现有服务层"
-│   ├── actions/                  示例 Action（读、写、带 undo）
+│   ├── actions/                  示例 Action（读、写、带 undo、生成式）
 │   │   ├── list-customers.ts
-│   │   └── invite-team-member.ts
+│   │   ├── invite-team-member.ts
+│   │   └── generate-report.ts    §24 Generative Action（handler 内跑 LLM）
 │   ├── mock-llm.ts               确定性的 mock LLM
 │   ├── server.ts                 Express server                  → `npm run dev`
 │   ├── chat-loop.ts              AI tool_use 单轮 demo            → `npm run demo`
@@ -172,9 +173,10 @@ lib/
 │   ├── mcp-server.ts             MCP server 入口                  → `npm run mcp`
 │   └── transparency.html         零框架的 §21 UI 演示             → /transparency
 │
-└── test/                         vitest 单元测试（55 个 case）
+└── test/                         vitest 单元测试（85 个 case）
     ├── helpers.ts                共享 fixture
     ├── define-action.test.ts     §4 spec 校验
+    ├── generative.test.ts        §24 kind / provenance + REST 头
     ├── dispatcher.test.ts        §6/§7/§13/§14 流程
     ├── never-list.test.ts        §12 注册时 + 派发时双层
     ├── plan.test.ts              §17 状态机
@@ -213,6 +215,8 @@ lib/
 | §21 透明度（数据层） | ✅ | `audit-query` + `context-decider` + `api-keys` + `anomaly` + `transparency.ts` |
 | §22 数据出境 / PII shield | ✅ | `pre-llm.ts` (PIIVault + RegionRouter) |
 | §23 跨入口连续性 | ⚠️ | 同一审计流；UI 联动留给消费者 |
+| §24 执行形状（kind / provenance） | ✅ | `define-action.ts` 默认+校验、`dispatcher.ts` 审计、`rest.ts` `X-Refract-Provenance` 头；示例 `generate-report.ts` |
+| §25-27 姿态 / 渲染 / 时序 | 📄 | 规范层（前端交互契约），无后端代码可落，见 STANDARD.md |
 
 ---
 

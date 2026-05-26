@@ -209,6 +209,9 @@ export async function dispatch(
       actor_user_id: ctx.user.id,
       delegation: ctx.delegation,
       action: { name: spec.name, version: spec.version },
+      // §24 — execution shape + output provenance
+      kind: spec.kind ?? 'deterministic',
+      provenance: spec.provenance ?? 'retrieved',
       input_hash: inputHash,
       status: succeeded ? 'success' : 'error',
       error_code:

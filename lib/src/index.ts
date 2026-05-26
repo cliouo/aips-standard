@@ -17,6 +17,8 @@ export type {
   Delegation,
   AuditLogger,
   Risk,
+  ExecutionKind,
+  Provenance,
   RateLimit,
 } from './types.js';
 

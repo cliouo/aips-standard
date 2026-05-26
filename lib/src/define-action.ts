@@ -61,6 +61,14 @@ function validateSpec(spec: ActionSpec): void {
       `[Refract] Action ${spec.name} has removedAt but no deprecatedAt`,
     );
   }
+
+  // §24: a deterministic action's output is system fact, not AI-generated.
+  // Declaring provenance 'generated' without kind 'generative' is a mislabel.
+  if (spec.kind !== 'generative' && spec.provenance === 'generated') {
+    throw new Error(
+      `[Refract] Action ${spec.name} declares provenance 'generated' but is not generative — set kind: 'generative', or pick provenance 'retrieved' / 'mixed'`,
+    );
+  }
 }
 
 export function defineAction<
@@ -71,6 +79,11 @@ export function defineAction<
   // Default aiInvocable to true (the whole point) — but you can set false
   // to expose an action over REST only, never to AI.
   spec.aiInvocable = spec.aiInvocable !== false;
+
+  // §24 — default execution shape + output provenance
+  spec.kind = spec.kind ?? 'deterministic';
+  spec.provenance =
+    spec.provenance ?? (spec.kind === 'generative' ? 'generated' : 'retrieved');
 
   validateSpec(spec as unknown as ActionSpec);
 
